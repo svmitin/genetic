@@ -69,18 +69,15 @@ class ModelDesigner:
         '''бесконечно добывает данные для обучения модели'''
         while True:
             target = randint(2, 8) * randint(2, 8) * randint(2, 8) * randint(2, 8) * randint(2, 8) * randint(2, 8) * randint(2, 8) * randint(2, 8)  # ml input
-            print(f'target: {target}')
             for properties_count in choice(PROPERTIES):                      # ml input
                 found = False
-                print(f'\tproperties_count: {properties_count}')
                 
                 prev_avg_difference = 0
                 result_does_not_change_count = 0
                 for population_count in range(100, 900, 100):                # ml output
-                    print(f'\t\tpopulation_count: {population_count}')
                     for depth in range(100, 900, 100):                       # ml output. DONT CHANGE
                         avg_depth, avg_difference = self.__get_difference(target, properties_count, population_count, depth)
-                        print(f'\t\t\tavg_depth: {avg_depth} avg_difference: {avg_difference}')
+                        print(f'target: {target} properties_count: {properties_count} population_count: {population_count} avg_depth: {avg_depth} avg_difference: {avg_difference}')
                         data = GeneticData(
                             target, 
                             population_count,
