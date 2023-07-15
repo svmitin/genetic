@@ -1,6 +1,7 @@
 from random import randint, choice
 from math import prod
 from datetime import datetime
+import multiprocessing
 
 import click
 from sqlalchemy import create_engine, MetaData
@@ -26,6 +27,12 @@ PROPERTIES = [
     [8, 11, 14],
 ]
 
+DBUSER = 'ml'
+DBPASS = 'ml'
+DBHOST = 'localhost'
+DBPORT = '5432'
+DBNAME = 'ml'
+
 
 class GeneticData(Base):
     __tablename__ = 'genetic'
@@ -43,20 +50,54 @@ class GeneticData(Base):
         self.depth = depth
         self.difference = difference
 
+
+def train(params):
+    batch_size, epochs = params
+    designer = ModelDesigner(task=None)
+    print('load_data')
+    x_train, y_train, x_test, y_test = designer.load_data()
+    print('start train')
+    model = designer.create_model(x_train, y_train, batch_size, epochs)
+    print('end train')
+    differences = []
+    
+    predictions = model.predict(np.array([x_test, y_test]))
+    for i, prediction in enumerate(predictions[0]):
+        target = x_test[i][0]
+        properties_count = x_test[i][1]
+        try:
+            population_count = int(prediction[0])
+            depth = int(prediction[1])
+            print(f'target: {target} properties_count: {properties_count} population_count: {population_count} depth: {depth}')
+            avg_depth, avg_difference = designer.get_difference(target, properties_count, population_count, depth)
+            differences.append(avg_difference)
+        except:
+            print('error')
+            population_count = 1000
+            depth = 1000
+            avg_depth = 1000
+            avg_difference = 100
+            differences.append(avg_difference)
+
+    result = {
+        'avg_difference': round(sum(differences) / len(differences), 5),
+        'batch_size': batch_size,
+        'epochs': epochs
+    }
+    return result
+
 class ModelDesigner:
-    def __init__(self, task='mining', dbuser='ml', dbpass='ml', dbhost='localhost', dbport=5432, dbname='ml'):
+    def __init__(self, task='mining'):
         self.name = f'{datetime.now().second}'
-        self.engine = create_engine(f'postgresql+psycopg2://{dbuser}:{dbpass}@{dbhost}:{dbport}/{dbname}')
+        self.engine = create_engine(f'postgresql+psycopg2://{DBUSER}:{DBPASS}@{DBHOST}:{DBPORT}/{DBNAME}')
         metadata = MetaData()
         self.session = Session(bind=self.engine)
         if task == 'mining':
             self.mining_data()
-        elif task == 'train':
+        if task == 'train':
             self.autotrain()
-        else:
-            print(f'Команда не корректна: {task}')
 
-    def __get_difference(self, target, properties_count, population_count, depth):
+    def get_difference(self, target, properties_count, population_count, depth):
         '''возвращает средние значения по глубине и % разницы для заданных аргументов'''
         differences, depths = [], []
         for _ in range(5):
@@ -81,7 +122,7 @@ class ModelDesigner:
                 result_does_not_change_count = 0
                 for depth in range(100, 700, 100):                              # ml output. DONT CHANGE
                     for population_count in range(20, 900, 10):                 # ml output
-                        avg_depth, avg_difference = self.__get_difference(target, properties_count, population_count, depth)
+                        avg_depth, avg_difference = self.get_difference(target, properties_count, population_count, depth)
                         # print(f'target: {target} properties_count: {properties_count} population_count: {population_count} avg_depth: {avg_depth} avg_difference: {avg_difference}')
                         data = GeneticData(
                             target, 
@@ -108,7 +149,7 @@ class ModelDesigner:
                 self.session = Session(bind=self.engine)
                 print(f'{self.name}: reconnect')
 
-    def __load_data(self):
+    def load_data(self):
         '''подготовка данных. отсивается лишнее, на лучших значениях будет обучаться модель'''
         raw_data = self.session.query(GeneticData).all()
         data = {}
@@ -159,7 +200,7 @@ class ModelDesigner:
             y_train.append(y)
         return x_train, y_train, x_test, y_test
 
-    def create_model(self, batch_size=300, epochs=1200):
+    def create_model(self, x_train, y_train, batch_size=300, epochs=1200):
         '''создает регрессионную модель'''
         model = Sequential([
             Dense(2, activation='relu'),
@@ -172,47 +213,58 @@ class ModelDesigner:
             optimizer='adam',
             metrics=['mae']
         )
-        x_train, y_train, x_test, y_test = self.__load_data()
         model.fit(
-            np.array(x_train),  # данные для обучения
-            np.array(y_train),  # правильные ответы 
-            batch_size=batch_size,     # размер мини-выборки
+            np.array(x_train),          # данные для обучения
+            np.array(y_train),          # правильные ответы 
+            batch_size=batch_size,      # размер мини-выборки
             epochs=epochs,
             validation_split=0.2,
-            # verbose=1
+            verbose=0
         )
         return model
-    
+
+    def train(batch_size, epochs):
+        x_train, y_train, x_test, y_test = self.load_data()
+        model = self.create_model(x_train, y_train, batch_size, epochs)
+        differences = []
+        for i, x in enumerate(x_test):
+            target, properties_count = x, y_test[i]
+            prediction = model.predict(np.array([[target, properties_count]]))
+            population_count = int(prediction[0][0])
+            depth = int(prediction[0][1])
+            avg_depth, avg_difference = self.get_difference(target, properties_count, population_count, depth)
+            differences.append(avg_difference)
+        return {
+            'avg_difference': round(sum(differences) / len(differences), 5),
+            'batch_size': batch_size,
+            'epochs': epochs
+        }
+
     def autotrain(self):
         '''Самостоятельно пытается обучить нейронную сеть'''
         good_params = {}
-        target = 225792
-        properties_count = 12
-        for batch_size in range(50, 400, 100):
-            for epochs in range(2000, 4000, 100):
-                model = self.create_model(batch_size, epochs)
-                prediction = model.predict(np.array([[target, properties_count]]))
-                population_count = int(prediction[0][0])
-                depth = int(prediction[0][1])
-                if population_count < 40 or depth < 1:
-                    continue
-                avg_depth, avg_difference = self.__get_difference(target, properties_count, population_count, depth)
-                good_params[avg_difference] = {
-                    'batch_size': batch_size,
-                    'epochs': epochs
-                }
+
+        params = []
+        for batch_size in [350]:
+            for epochs in range(3200, 3800, 100):
+                params.append((batch_size, epochs,))
+        
+        pool = multiprocessing.Pool(processes=multiprocessing.cpu_count())
+        good_params = pool.map(train, params)
+        good_params = {gp['avg_difference']: gp for gp in good_params}
         if good_params:
-            best_difference = min(good_params.keys())
+            best_difference = min(good_params)
             best_params = good_params[best_difference]
-            model = self.create_model(best_params['batch_size'], best_params['epochs'])
-            model.save('model.h5')
             print(best_params)
+            x_train, y_train, x_test, y_test = self.load_data()
+            model = self.create_model(x_train, y_train, best_params['batch_size'], best_params['epochs'])
+            model.save('model.h5')
         print(good_params)
 
-        prediction = model.predict(np.array([[target, properties_count]]))
-        population_count = int(prediction[0][0])
-        depth = int(prediction[0][1])
-        print(population_count, depth)
+        # prediction = model.predict(np.array([[target, properties_count]]))
+        # population_count = int(prediction[0][0])
+        # depth = int(prediction[0][1])
+        # print(population_count, depth)
 
 
 @click.command()
@@ -223,7 +275,12 @@ class ModelDesigner:
 @click.option('--dbport', default=5432, help='Максимальное количество поколений (итераций отбора/скрещивания)')
 @click.option('--dbname', default='ml', help='Максимальное количество поколений (итераций отбора/скрещивания)')
 def run(task, dbuser, dbpass, dbhost, dbport, dbname):
-    designer = ModelDesigner(task, dbuser, dbpass, dbhost, dbport, dbname)
+    DBUSER = dbuser
+    DBPASS = dbpass
+    DBHOST = dbhost
+    DBPORT = dbport
+    DBNAME = dbname
+    designer = ModelDesigner(task)
 
 
 if __name__ == '__main__':
