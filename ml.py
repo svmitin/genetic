@@ -1,4 +1,6 @@
 from random import randint, choice
+from math import prod
+from datetime import datetime
 
 import click
 from sqlalchemy import create_engine, MetaData
@@ -17,6 +19,8 @@ from genetic import Farm
 Base = declarative_base()
 
 PROPERTIES = [
+    [4, 7, 10],
+    [5, 8, 11],
     [6, 9, 12],
     [7, 10, 13],
     [8, 11, 14],
@@ -41,13 +45,14 @@ class GeneticData(Base):
 
 class ModelDesigner:
     def __init__(self, task='mining', dbuser='ml', dbpass='ml', dbhost='localhost', dbport=5432, dbname='ml'):
-        engine = create_engine(f'postgresql+psycopg2://{dbuser}:{dbpass}@{dbhost}:{dbport}/{dbname}')
+        self.name = f'{datetime.now().second}'
+        self.engine = create_engine(f'postgresql+psycopg2://{dbuser}:{dbpass}@{dbhost}:{dbport}/{dbname}')
         metadata = MetaData()
-        self.session = Session(bind=engine)
+        self.session = Session(bind=self.engine)
         if task == 'mining':
             self.mining_data()
         elif task == 'train':
-            self.create_model()
+            self.autotrain()
         else:
             print(f'Команда не корректна: {task}')
 
@@ -68,16 +73,16 @@ class ModelDesigner:
     def mining_data(self):
         '''бесконечно добывает данные для обучения модели'''
         while True:
-            target = randint(2, 8) * randint(2, 8) * randint(2, 8) * randint(2, 8) * randint(2, 8) * randint(2, 8) * randint(2, 8) * randint(2, 8)  # ml input
-            for properties_count in choice(PROPERTIES):                      # ml input
+            for properties_count in choice(PROPERTIES):                          # ml input
+                target = prod([randint(1, 8) for t in range(properties_count)])  # ml input
                 found = False
-                
+
                 prev_avg_difference = 0
                 result_does_not_change_count = 0
-                for population_count in range(100, 900, 100):                # ml output
-                    for depth in range(100, 900, 100):                       # ml output. DONT CHANGE
+                for depth in range(100, 700, 100):                              # ml output. DONT CHANGE
+                    for population_count in range(20, 900, 10):                 # ml output
                         avg_depth, avg_difference = self.__get_difference(target, properties_count, population_count, depth)
-                        print(f'target: {target} properties_count: {properties_count} population_count: {population_count} avg_depth: {avg_depth} avg_difference: {avg_difference}')
+                        # print(f'target: {target} properties_count: {properties_count} population_count: {population_count} avg_depth: {avg_depth} avg_difference: {avg_difference}')
                         data = GeneticData(
                             target, 
                             population_count,
@@ -89,15 +94,19 @@ class ModelDesigner:
                             break
                         if prev_avg_difference == avg_difference:
                             result_does_not_change_count += 1
-                        if avg_difference < 1:
+                        if avg_difference < 0.7:
                             self.session.add(data)
-                        if avg_difference < 0.5 or result_does_not_change_count > 5:
+                        if avg_difference < 0.4 or result_does_not_change_count > 5:
                             found = True
                             break
                     if found:
                         break
-            print('save data')
-            self.session.commit()
+            try:
+                self.session.commit()
+                print(f'{self.name}: save data')
+            except:
+                self.session = Session(bind=self.engine)
+                print(f'{self.name}: reconnect')
 
     def __load_data(self):
         '''подготовка данных. отсивается лишнее, на лучших значениях будет обучаться модель'''
@@ -150,10 +159,11 @@ class ModelDesigner:
             y_train.append(y)
         return x_train, y_train, x_test, y_test
 
-    def create_model(self):
+    def create_model(self, batch_size=300, epochs=1200):
         '''создает регрессионную модель'''
         model = Sequential([
             Dense(2, activation='relu'),
+            Dense(6),
             Dense(3),
             Dense(2)
         ])
@@ -166,12 +176,43 @@ class ModelDesigner:
         model.fit(
             np.array(x_train),  # данные для обучения
             np.array(y_train),  # правильные ответы 
-            batch_size=300,     # размер мини-выборки
-            epochs=1200,
+            batch_size=batch_size,     # размер мини-выборки
+            epochs=epochs,
             validation_split=0.2,
-            verbose=1
+            # verbose=1
         )
-        model.save('model.h5')
+        return model
+    
+    def autotrain(self):
+        '''Самостоятельно пытается обучить нейронную сеть'''
+        good_params = {}
+        target = 225792
+        properties_count = 12
+        for batch_size in range(50, 400, 100):
+            for epochs in range(2000, 4000, 100):
+                model = self.create_model(batch_size, epochs)
+                prediction = model.predict(np.array([[target, properties_count]]))
+                population_count = int(prediction[0][0])
+                depth = int(prediction[0][1])
+                if population_count < 40 or depth < 1:
+                    continue
+                avg_depth, avg_difference = self.__get_difference(target, properties_count, population_count, depth)
+                good_params[avg_difference] = {
+                    'batch_size': batch_size,
+                    'epochs': epochs
+                }
+        if good_params:
+            best_difference = min(good_params.keys())
+            best_params = good_params[best_difference]
+            model = self.create_model(best_params['batch_size'], best_params['epochs'])
+            model.save('model.h5')
+            print(best_params)
+        print(good_params)
+
+        prediction = model.predict(np.array([[target, properties_count]]))
+        population_count = int(prediction[0][0])
+        depth = int(prediction[0][1])
+        print(population_count, depth)
 
 
 @click.command()

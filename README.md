@@ -40,12 +40,12 @@ CREATE DATABASE ml
 ```sql
 CREATE TABLE IF NOT EXISTS public.genetic
 (
-    id bigint NOT NULL DEFAULT nextval('genetic_id_seq'::regclass),
-    target integer NOT NULL,
+    id bigserial NOT NULL,
+    target bigint NOT NULL,
     properties_count integer NOT NULL,
     population_count integer NOT NULL,
     depth integer NOT NULL,
-    difference numeric(10,5) NOT NULL,
+    difference numeric(12,7) NOT NULL,
     CONSTRAINT genetic_pkey PRIMARY KEY (id)
 )
 
