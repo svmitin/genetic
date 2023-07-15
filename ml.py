@@ -26,8 +26,7 @@ DBNAME = 'ml'
 Base = declarative_base()
 engine = create_engine(f'postgresql+psycopg2://{DBUSER}:{DBPASS}@{DBHOST}:{DBPORT}/{DBNAME}')
 metadata = MetaData()
-session = Session(bind=engine)
-
+session = None
 
 PROPERTIES = [
     [4, 7, 10],
@@ -55,11 +54,10 @@ class GeneticData(Base):
         self.difference = difference
 
 
-def new_session():
+def update_session():
     '''Пересоздает подключение к БД'''
     global session
     session = Session(bind=engine)
-
 
 def get_difference(target, properties_count, population_count, depth):
     '''возвращает средние значения по глубине и % разницы для заданных аргументов'''
@@ -74,7 +72,6 @@ def get_difference(target, properties_count, population_count, depth):
         differences.append(result['difference'])
         depths.append(result['depth'])
     return int(sum(depths)/len(depths)), round(sum(differences)/len(differences), 5)
-
 
 def mining_data():
     '''бесконечно добывает данные для обучения модели'''
@@ -111,9 +108,8 @@ def mining_data():
             session.commit()
             print(f'save data')
         except:
-            new_session()
+            update_session()
             print(f'reconnected')
-
 
 def load_data():
     '''подготовка данных. отсивается лишнее, на лучших значениях будет обучаться модель'''
@@ -166,7 +162,6 @@ def load_data():
         y_train.append(y)
     return x_train, y_train, x_test, y_test
 
-
 def create_model(x_train, y_train, batch_size=300, epochs=1200):
     '''создает, обучает и возвращает регрессионную модель'''
     model = Sequential([
@@ -190,31 +185,24 @@ def create_model(x_train, y_train, batch_size=300, epochs=1200):
     )
     return model
 
-
 def train_model(params):
     '''Тренирует модель. Обычно вызывается в отдельном процессе'''
     batch_size, epochs, x_train, y_train, x_test, y_test = params
     print(f'start train with batch_size: {batch_size}, epochs: {epochs}')
     model = create_model(x_train, y_train, batch_size, epochs)
-    print(f'end train with batch_size: {batch_size}, epochs: {epochs}')
+    # print(f'end train with batch_size: {batch_size}, epochs: {epochs}')
     differences = []
     
     predictions = model.predict(np.array([x_test, y_test]))
     for i, prediction in enumerate(predictions[0]):
         target = x_test[i][0]
         properties_count = x_test[i][1]
-        try:
-            population_count = int(prediction[0])
-            depth = int(prediction[1])
-            print(f'target: {target} properties_count: {properties_count} population_count: {population_count} depth: {depth}')
+        population_count, depth = int(prediction[0]), int(prediction[1])
+        if population_count < 10 or depth < 2:
+            return {}
+        else:
+            # print(f'target: {target} properties_count: {properties_count} population_count: {population_count} depth: {depth}')
             avg_depth, avg_difference = get_difference(target, properties_count, population_count, depth)
-            differences.append(avg_difference)
-        except:
-            print('error')
-            population_count = 1000
-            depth = 1000
-            avg_depth = 1000
-            avg_difference = 100
             differences.append(avg_difference)
 
     result = {
@@ -224,26 +212,36 @@ def train_model(params):
     }
     return result
 
-
 def autotrain():
     '''Самостоятельно пытается обучить нейронную сеть'''
     x_train, y_train, x_test, y_test = load_data()
     params = []
     for batch_size in [350]:
-        for epochs in range(3200, 3800, 100):
+        for epochs in range(3900, 8000, 100):
             params.append((batch_size, epochs, x_train, y_train, x_test, y_test,))
-    
-    cpu_count = multiprocessing.cpu_count()
-    pool = multiprocessing.Pool(processes=cpu_count)
-    good_params = pool.map(train_model, params)
 
-    good_params = {gp['avg_difference']: gp for gp in good_params}
-    if good_params:
-        best_difference = min(good_params)
-        best_params = good_params[best_difference]
-        print(best_params)
-        model = create_model(x_train, y_train, best_params['batch_size'], best_params['epochs'])
-        model.save('model.h5')
+    prew_best_difference = 100  # % разницы. со временем будет понижаться
+    good_params = {}
+    while params:
+        cpu_count = multiprocessing.cpu_count()
+        current_params, params = params[:cpu_count], params[cpu_count:]
+        pool = multiprocessing.Pool(processes=cpu_count)
+        train_results = pool.map(train_model, current_params)
+        for train_result in train_results:
+            if 'avg_difference' in train_result:
+                good_params[train_result['avg_difference']] = train_result
+        if good_params:
+            best_difference = min(good_params.keys())
+            if best_difference > prew_best_difference:
+                print('stagnation')
+                break
+            prew_best_difference = best_difference
+
+    best_difference = min(good_params.keys())
+    best_params = good_params[best_difference]
+    print(best_params)
+    model = create_model(x_train, y_train, best_params['batch_size'], best_params['epochs'])
+    model.save('model.h5')
     print(good_params)
 
 
@@ -260,7 +258,7 @@ def run(task, dbuser, dbpass, dbhost, dbport, dbname):
     DBHOST = dbhost
     DBPORT = dbport
     DBNAME = dbname
-    new_session()
+    update_session()
     if task == 'mining':
         mining_data()
     if task == 'train':
