@@ -85,7 +85,6 @@ def mining_data():
             for depth in range(100, 700, 100):                              # ml output. DONT CHANGE
                 for population_count in range(20, 900, 10):                 # ml output
                     avg_depth, avg_difference = get_difference(target, properties_count, population_count, depth)
-                    # print(f'target: {target} properties_count: {properties_count} population_count: {population_count} avg_depth: {avg_depth} avg_difference: {avg_difference}')
                     data = GeneticData(
                         target, 
                         population_count,
@@ -190,8 +189,7 @@ def train_model(params):
     batch_size, epochs, x_train, y_train, x_test, y_test = params
     print(f'start train with batch_size: {batch_size}, epochs: {epochs}')
     model = create_model(x_train, y_train, batch_size, epochs)
-    # print(f'end train with batch_size: {batch_size}, epochs: {epochs}')
-    differences = []
+    grade = 0
     
     predictions = model.predict(np.array([x_test, y_test]))
     for i, prediction in enumerate(predictions[0]):
@@ -200,13 +198,16 @@ def train_model(params):
         population_count, depth = int(prediction[0]), int(prediction[1])
         if population_count < 10 or depth < 2:
             return {}
-        else:
-            # print(f'target: {target} properties_count: {properties_count} population_count: {population_count} depth: {depth}')
-            avg_depth, avg_difference = get_difference(target, properties_count, population_count, depth)
-            differences.append(avg_difference)
+        avg_depth, avg_difference = get_difference(target, properties_count, population_count, depth)
+        if avg_difference >= 0 and avg_difference < 0.5:
+            grade += 4
+        elif avg_difference >= 0 and avg_difference < 1:
+            grade += 2
+        elif avg_difference >= 0 and avg_difference < 2:
+            grade += 1
 
     result = {
-        'avg_difference': round(sum(differences) / len(differences), 5),
+        'grade': grade,
         'batch_size': batch_size,
         'epochs': epochs
     }
@@ -220,29 +221,40 @@ def autotrain():
         for epochs in range(3900, 8000, 100):
             params.append((batch_size, epochs, x_train, y_train, x_test, y_test,))
 
-    prew_best_difference = 100  # % разницы. со временем будет понижаться
-    good_params = {}
+    prew_best_grade = 0         # оценка лучшего метода обучения модели
+    params_with_grade = {}      # оцененные методы обучения модели
+    cpu_count = multiprocessing.cpu_count()
     while params:
-        cpu_count = multiprocessing.cpu_count()
         current_params, params = params[:cpu_count], params[cpu_count:]
         pool = multiprocessing.Pool(processes=cpu_count)
         train_results = pool.map(train_model, current_params)
-        for train_result in train_results:
-            if 'avg_difference' in train_result:
-                good_params[train_result['avg_difference']] = train_result
-        if good_params:
-            best_difference = min(good_params.keys())
-            if best_difference > prew_best_difference:
-                print('stagnation')
-                break
-            prew_best_difference = best_difference
 
-    best_difference = min(good_params.keys())
-    best_params = good_params[best_difference]
-    print(best_params)
+        best_grade = 0
+        for train_result in train_results:
+            if 'grade' in train_result:
+                params_with_grade[train_result['grade']] = train_result
+                best_grade = best_grade if best_grade > train_result['grade'] else train_result['grade']
+
+        if params_with_grade:
+            if best_grade < prew_best_grade:
+                print('stagnation found')
+                break
+            prew_best_difference = best_grade
+
+    best_grade = max(params_with_grade.keys())
+    best_params = params_with_grade[best_grade]
+    print(f'best_params: {best_params}')
     model = create_model(x_train, y_train, best_params['batch_size'], best_params['epochs'])
     model.save('model.h5')
-    print(good_params)
+    print(f'params_with_grade: {params_with_grade}')
+
+def manualtrain():
+    '''Обучает нейронную сеть по заданным параметрам'''
+    batch_size = int(input('batch size: '))
+    epochs = int(input('epochs: '))
+    x_train, y_train, x_test, y_test = load_data()
+    model = create_model(x_train, y_train, batch_size, epochs)
+    model.save('model.h5')
 
 
 @click.command()
@@ -262,6 +274,8 @@ def run(task, dbuser, dbpass, dbhost, dbport, dbname):
     if task == 'mining':
         mining_data()
     if task == 'train':
+        manualtrain()
+    if task == 'autotrain':
         autotrain()
 
 
