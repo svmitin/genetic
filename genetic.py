@@ -112,6 +112,7 @@ def run(target, properties_count, population_count, depth):
         prediction = model.predict(np.array([[target, properties_count]]))
         population_count = int(prediction[0][0])
         depth = int(prediction[0][1])
+        print(population_count, depth)
     farm = Farm(
         target = target,
         properties_count = properties_count,
