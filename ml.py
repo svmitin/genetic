@@ -105,10 +105,10 @@ def mining_data():
                     break
         try:
             session.commit()
-            print(f'save data')
+            print('save data')
         except:
             update_session()
-            print(f'reconnected')
+            print('reconnected')
 
 def load_data():
     '''подготовка данных. отсивается лишнее, на лучших значениях будет обучаться модель'''
