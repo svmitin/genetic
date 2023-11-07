@@ -1,6 +1,7 @@
 from random import randint
 from random import choice
 from math import prod
+from typing import Dict
 
 import click
 from tensorflow.keras.models import load_model
@@ -26,7 +27,7 @@ class Person:
 
 
 class Farm:
-    def __init__(self, target, properties_count, population_count, depth):
+    def __init__(self, target: int, properties_count: int, population_count: int, depth: int):
         self.target = target
         self.properties_count = properties_count
         self.population_count = population_count
@@ -47,7 +48,7 @@ class Farm:
             return result * self.properties_count * self.population_count
         return result
     
-    def run(self) -> dict:
+    def run(self) -> Dict:
         '''запуск поиска лучшей особи'''
         iterations_count = 0
         for i, _ in enumerate(range(self.depth), start=1):
