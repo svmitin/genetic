@@ -27,6 +27,7 @@ pip3 install -r requirements.txt
 ```bash
 python app.py
 ```
+<img width="662" src="https://github.com/svmitin/genetic/assets/69031401/60d776d5-50d7-493d-8cb5-6caaf03b357b">
 
 ### Запуск приложения genetic.py
 Обычный Python3 скрипт реализующий генетический алгоритм
